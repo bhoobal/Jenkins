@@ -1,0 +1,93 @@
+jenkins config.xml
+
+<!-- config.xml-->
+<?xml version='1.0' encoding='UTF-8'?>
+<hudson>
+  <disabledAdministrativeMonitors/>
+  <version>2.20</version>
+  <numExecutors>4</numExecutors>
+  <mode>NORMAL</mode>
+  <useSecurity>true</useSecurity>
+  <authorizationStrategy class="hudson.security.ProjectMatrixAuthorizationStrategy">
+    <permission>com.cloudbees.plugins.credentials.CredentialsProvider.Create:CRT</permission>
+   
+  </authorizationStrategy>
+  <securityRealm class="hudson.plugins.active_directory.ActiveDirectorySecurityRealm" plugin="active-directory@1.47">
+    <domain>yourdomainname.com</domain>
+    <site>ldap://yourdomain.com</site>
+    <bindName>poweruser@yourdomain.com</bindName>
+    <bindPassword>encryptedpassword</bindPassword>
+    <server>yourdomainserver.com:389</server>
+    <groupLookupStrategy>AUTO</groupLookupStrategy>
+    <removeIrrelevantGroups>false</removeIrrelevantGroups>
+  </securityRealm>
+  <disableRememberMe>false</disableRememberMe>
+  <projectNamingStrategy class="jenkins.model.ProjectNamingStrategy$DefaultProjectNamingStrategy"/>
+  <workspaceDir>D:\jenkins\workspace\${ITEM_FULL_NAME}</workspaceDir>
+  <buildsDir>D:\jenkins\workspace\builds\${ITEM_FULL_NAME}</buildsDir>
+  <markupFormatter class="hudson.markup.RawHtmlMarkupFormatter" plugin="antisamy-markup-formatter@1.1">
+    <disableSyntaxHighlighting>false</disableSyntaxHighlighting>
+  </markupFormatter>
+  <jdks>
+    <jdk>
+      <name>Default</name>
+      <home></home>
+      <properties/>
+    </jdk>
+  </jdks>
+  <viewsTabBar class="hudson.views.DefaultViewsTabBar"/>
+  <myViewsTabBar class="hudson.views.DefaultMyViewsTabBar"/>
+  <clouds/>
+  <quietPeriod>5</quietPeriod>
+  <scmCheckoutRetryCount>0</scmCheckoutRetryCount>
+  
+  <primaryView>All</primaryView>
+  <slaveAgentPort>50000</slaveAgentPort>
+  <label></label>
+  <nodeProperties/>
+  <globalNodeProperties>
+    <hudson.slaves.EnvironmentVariablesNodeProperty>
+      <envVars serialization="custom">
+        <unserializable-parents/>
+        <tree-map>
+          <default>
+            <comparator class="hudson.util.CaseInsensitiveComparator" reference="../../../../../../views/listView[68]/jobNames/comparator"/>
+          </default>
+          <int>2</int>
+          <string>MAVEN_OPTS</string>
+          <string>-Xmx2048m</string>
+          <string>VSTS_TEST_PLAN_ID</string>
+          <string>i44</string>
+        </tree-map>
+      </envVars>
+    </hudson.slaves.EnvironmentVariablesNodeProperty>
+  </globalNodeProperties>
+</hudson>
+
+
+jenkins.xml
+
+<service>
+  <id>jenkins</id>
+  <name>Jenkins</name>
+  <description>This service runs Jenkins continuous integration system.</description>
+  <env name="JENKINS_HOME" value="%BASE%"/>
+  <!--
+    if you'd like to run Jenkins with a specific version of Java, specify a full path to java.exe.
+    The following value assumes that you have java in your PATH.
+	
+	-javaagent:"D:\newrelic-java-3.29.0\newrelic\newrelic.jar" 
+  -->
+  <!-- <executable>%BASE%\jre\bin\java</executable> -->
+  <executable>D:\java\bin\java</executable>
+<arguments>-Xrs -Xmx8192m -javaagent:"D:\newrelic-java-3.29.0\newrelic\newrelic.jar" -Dhudson.lifecycle=hudson.lifecycle.WindowsServiceLifecycle -jar "%BASE%\jenkins.war" --httpPort=8080 --httpsPort=443 --httpsKeyStore="%BASE%\secrets\certificate_keystore2018.jks" --httpsKeyStorePassword=yourpassword</arguments>
+  <!--
+  
+    interactive flag causes the empty black Java window to be displayed.
+    I'm still debugging this.
+  <interactive />
+  -->
+  <logmode>rotate</logmode>
+
+  <onfailure action="restart" />
+</service>
