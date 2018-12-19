@@ -1,0 +1,168 @@
+
+def runPipeline() {
+
+  echo "Running JENKINS PIPELINE..."
+
+
+  def version = getVersion()
+
+  currentBuild.setDisplayName(version)
+
+  echo "version: ${version}"
+
+  stage "Package + Unit Test"
+  packageAndUnitTest(version)
+
+  stage "Deploy: CI"
+  deploy("CI", "TEST", env.BRANCH_NAME)
+
+  if (env.BRANCH_NAME != "master" && env.BRANCH_NAME != "release") {
+    stage name: "Prompt for Acceptance Tests"
+    input "Run acceptance tests?"
+  }
+  
+  try {
+    runAcceptanceTestSuites()
+  } catch (all) { 
+    echo "runAcceptanceTestSuites failed... see logs for more details"
+  }
+
+  //deploy("STABLE", "DEV", env.BRANCH_NAME)
+
+  // if (env.BRANCH_NAME == "master" || env.BRANCH_NAME.startsWith("release-")) {
+  //   slackSend channel: "#somechannel", color: "good", teamDomain: "slackteam", token: "APItokengoesinhere"
+  // }
+}
+
+def packageAndUnitTest(version) {
+  node("jenkinsslave") {
+    dir ("app") {
+      bat 'git rev-parse HEAD > GIT_COMMIT'
+      gitCommit=readFile('GIT_COMMIT').trim()
+
+      echo "package + unit test: branch: ${env.BRANCH_NAME}, version: ${version}, commit: ${gitCommit}"
+
+      bat "PowerShell.exe -ExecutionPolicy Bypass -Command .\\powershell-scripts\\application\\PackageAppAndAcceptanceTests.ps1 -Version \"${version}\" -Commit \"${gitCommit}\""
+
+      dir ("dist") {
+          stash name: "package-app", includes: "**"
+      }
+      archive includes: "dist/**"
+      archive includes: "application.zip"
+      // stash name: "package-at", includes: "acceptanceTests/bin/Debug/**,TestSettings.testsettings"
+
+      dir(".tmp")
+        {
+          archive includes: "unit-tests/**,coverage/phantomjs/*.xml"
+          dir("unit-tests") {
+            step([$class: 'JUnitResultArchiver', testResults: '**/*.xml'])
+          }
+          //dir("coverage") {
+              //step([$class: 'JUnitResultArchiver', testResults: '**/cobertura-coverage.xml'])
+          //}
+      }
+
+      if (env.BRANCH_NAME == "master" || env.BRANCH_NAME == "release") {
+        // tag build
+        def tagParameters = [
+            new StringParameterValue("REPO_NAME", "strator"),
+            new StringParameterValue("COMMIT_ISH", gitCommit),
+            new StringParameterValue("TAG", version)
+        ]
+        build job: "tag-vso-commit", parameters: tagParameters
+      }
+
+    }
+  }
+}
+
+def deploy(uiEnvironment, apiEnvironment, branchName) {
+  node("jenkins_Slave") {
+    bat "if exist deploy ( rmdir /s /q deploy )"
+    dir("deploy") {
+      echo "deploy uiEnvironment: ${uiEnvironment}, apiEnvironment: ${apiEnvironment}"
+
+      dir ("dist") {
+        unstash "package-app"
+      }
+
+      bat "PowerShell.exe -ExecutionPolicy Bypass -Command ..\\app\\powershell-scripts\\someapplication\\DeployToartifactory.ps1 -UIEnvironment ${uiEnvironment} -ApiEnvironment ${apiEnvironment} -BranchName ${branchName}"
+    }
+  }
+}
+
+def runAcceptanceTestSuites() {
+
+  node("Mi_Slave") {
+    dir ("app") {
+        bat "PowerShell.exe -ExecutionPolicy Bypass -Command .\\powershell-scripts\\asdasgdasd\\AcceptanceTests.ps1"
+    }
+  }
+
+  stage "Acceptance Tests"
+  runTestSuite("CI", env.BRANCH_NAME, ["Medium"])
+
+}
+
+def runTestSuite(uiEnvironment, branchName, windowSizes) {
+  def testRuns = [:]
+  for (int i = 0; i < windowSizes.size(); i++) {
+    def size = windowSizes[i]
+    testRuns["${size}"] = {
+      node("Mi_Slave") {
+      bat "if exist at1 ( rmdir /s /q at1 )"
+        dir("at1") {          
+          unstash "acceptanceTest"
+          dir("Automation") {
+            dir ("app") {
+              unstash "administrator"
+              bat "PowerShell.exe -ExecutionPolicy Bypass -Command .\\powershell-scripts\\ar\\ATCompile.ps1"
+            }
+            runTests(uiEnvironment, branchName, size)
+            archive includes: "**/Out/*.log, **/Out/*.jpg"
+          }
+        }
+      }
+    }
+  }
+
+  // run the tests in parallel
+  parallel testRuns
+}
+
+
+def runTests(uiEnvironment, branchName, windowSize) {
+  echo "running acceptance tests: uiEnvironment: ${uiEnvironment}, branchName: ${branchName}, windowSize: ${windowSize}"
+
+  bat "PowerShell.exe -ExecutionPolicy Bypass -Command .\\app\\powershell-scripts\\tor\\RunAcceptanceTests.ps1 -UIEnvironment ${uiEnvironment} -BranchName ${branchName} -WindowSize ${windowSize}"
+
+  // Convert MSTest trx file to JUnit format to make Jenkins happy
+  // https://issues.jenkins-ci.org/browse/JENKINS-32937
+  bat '.\\app\\msxsl.exe AcceptanceTestResults.trx ".\\app\\mstest-to-junit.xsl" -o acceptancetestresults.xml'
+  step([$class: 'JUnitResultArchiver', allowEmptyResults: true, testResults: '**/acceptancetestresults.xml'])
+
+  // Archive the trx file for reporting purposes
+  bat "echo listing acceptance test results files && dir"
+  bat "copy AcceptanceTestResults.trx ATResults-${friendlyCategory}-${windowSize}.trx"
+  bat "if exist RerunAcceptanceTestResults.trx (copy RerunAcceptanceTestResults.trx ATRerun-${friendlyCategory}-${windowSize}.trx)"
+  archive includes: "ATResults-${friendlyCategory}-${windowSize}.trx, ATRerun-${friendlyCategory}-${windowSize}.trx"
+}
+
+
+def getVersion() {
+  echo "Getting version for branch ${env.BRANCH_NAME}..."
+
+  if (env.BRANCH_NAME == "release") {
+    // release build
+    // return env.BRANCH_NAME.substring(14) + ".${currentBuild.number}r" // replace with substring(8)
+    return env.BRANCH_NAME + ".${currentBuild.number}r"
+  } else if (env.BRANCH_NAME == "master") {
+    // master build
+    return "${currentBuild.number}m"
+  } else {
+    // feature build
+    return "${env.BRANCH_NAME}-${currentBuild.number}f"
+  }
+}
+
+return this
