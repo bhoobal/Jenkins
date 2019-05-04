@@ -3,12 +3,16 @@ pipeline {
   stages {
     stage('stage1') {
       parallel {
-        stage('stage1') {
+        stage('Windows Batch 1') {
           steps {
-            bat(script: 'echo "Step 1"', returnStdout: true)
+            bat(script: 'echo "Step 1"')
+          }
+          stage('Windows Batch 2') {
+          steps {
+            bat(script: 'echo "Parallel Step 2"')
           }
         }
-        stage('step2') {
+        stage('Powershell Stage- No Parallel') {
           steps {
             powershell(script: 'get-process')
           }
