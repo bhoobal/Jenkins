@@ -10,7 +10,7 @@ pipeline {
         }
         stage('step2') {
           steps {
-            powershell(script: 'get-process', returnStatus: true, returnStdout: true)
+            powershell(script: 'get-process')
           }
         }
       }
