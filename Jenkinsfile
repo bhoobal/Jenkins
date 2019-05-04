@@ -7,6 +7,7 @@ pipeline {
           steps {
             bat(script: 'echo "Step 1"')
           }
+        }
           stage('Windows Batch 2') {
           steps {
             bat(script: 'echo "Parallel Step 2"')
