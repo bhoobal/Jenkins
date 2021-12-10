@@ -195,3 +195,224 @@ def GetChangeLogs() {
     }
     return commitVals
 }
+----------------------------------------------------------
+pipeline {
+    agent {
+        node {
+            label 'slave-test'
+        }
+    }
+    environment {
+       NumRetries = "2"
+       test_environment = "UAT"
+       browser_use_grid = "true"
+       browser_grid_provider = "browserstack"
+       browserstack_resolution = "1920x1080"
+       browserstack_use_vpn = "true"
+       kinesisfirehose_enabled = "true"
+       kinesisfirehose_deliverystream = "Kinesislogstream"
+       kinesisfirehose_regionendpoint = "au-west-1"
+       kinesisfirehose_rolearn = "arn:aws:iam:::role/firehose_delivery_role"
+       MSBUILDDISABLENODEREUSE = "1"
+    }
+	parameters {
+        string(name: 'GitBranch', defaultValue: 'develop', description: 'the branch to clone')
+        string(name: 'TestFilter', defaultValue: '"TestCategory=gory"', description: 'dotnet test --filter [value]\n\nEXAMPLES VALUES\n* Tests\n* FullyQualifiedName~Tests\nthese two first examples are equivalent\n* Name!=MyTestMethod\n* "ClassName=MyTestClass1 | ClassName=MyTestClass2"\n* "TestCategory=Customer & Priority=1"\n\nDOCS https://docs.microsoft.com/en-us/dotnet/core/tools/dotnet-test?tabs=netcore21#filter-option-details')
+        string(name: 'test_platform', defaultValue: 'windows_10_chrome_90', description: 'the platform details to use in running the tests')
+        booleanParam(name: 'testcase_read', defaultValue: true, description: 'use TestRail to filter execution')
+        booleanParam(name: 'testcase_write', defaultValue: false, description: 'write results to a pre-existing TestRail Plan')
+        string(name: 'testrail_case_includes', defaultValue: '', description: 'the category or delimited list of categories to run tests from')
+        string(name: 'testcase_planid', defaultValue: '', description: 'the TestRail plan to write results to')
+        string(name: 'NumThreads', defaultValue: '7', description: '')
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                deleteDir() /* clean up our workspace */
+            }
+        }
+        stage('Get code from BitBucket') { // for display purposes
+            steps {
+                // Get code from a BitBucket repository
+                git branch: "${GitBranch}", changelog: false, credentialsId: '123342-23423-f764543712c9', poll: false, url: "https://repourl://t.tests.git"
+
+                // update build name
+                script {
+                    // Get the revision
+                    shortCommit = sh(returnStdout: true, script: "git log -n 1 --pretty=format:'%h'").trim()
+                    currentBuild.displayName = "#${BUILD_NUMBER}-${GitBranch}-${shortCommit}"
+                }
+            }
+        }
+        stage('Build Solution') {
+            steps {
+                bat(returnStdout: false, script: "dotnet build api.Automation.sln")
+            }
+            post {
+                success {
+                    echo 'Build Solution completed successfully'
+                }
+            }
+        }
+        stage('Test Solution') {
+            steps {
+                bat(returnStdout: false, script: "dotnet test api.ui.Automation.sln --no-build --no-restore -l \"trx;LogFileName=UnitTestResults.trx\" --filter \"${TestFilter}\"")
+            }
+            post {
+                always {
+                    echo 'Archiving Test Results and Logs'
+                    archiveArtifacts artifacts: '**\\TestResults\\*', fingerprint: true, allowEmptyArchive: true
+                    echo 'Publishing Test Results'
+                    publishHTML([allowMissing: true, alwaysLinkToLastBuild: true, keepAll: true, reportDir: 'TestResults', reportFiles: 'TestResults.html', reportName: 'Test Results HTML', reportTitles: ''])
+                    catchError {
+                        step([$class: 'MSTestPublisher', testResultsFile:"**\\TestResults\\*.trx", failOnError: true, keepLongStdio: true])
+                        echo 'sending results to logstash...' 
+                        logstashSend failBuild: false, maxLines: 2
+                    }
+                }
+                success {
+                    echo 'Test Solution completed successfully'
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Successful Build'
+        }
+        unstable {
+            echo 'Unstable Build'
+        }
+        failure {
+            echo 'Failed Build'
+        }
+        changed {
+            echo 'Status Change from previous build'
+        }
+    }
+}
+
+
+pipeline {
+    agent {
+        node {
+            label 'development'
+        }
+    }
+    environment {
+       test_environment = "development"
+       browser_use_grid = "true"
+       browser_grid_provider = "browserstack"
+       browserstack_resolution = "1920x1080"
+       browserstack_use_vpn = "true"
+       kinesisfirehose_enabled = "true"
+       kinesisfirehose_deliverystream = "streamname"
+       kinesisfirehose_regionendpoint = "au-west-1"
+       kinesisfirehose_rolearn = "arn:aws:iam::123457689:role/firehose_delivery_role"
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+    parameters {
+        string(name: 'GitBranch', defaultValue: 'develop', description: 'the branch to clone')
+        string(name: 'TestFilter', defaultValue: '"TestCategory=sometestCategory"', description: 'dotnet test --filter [value]\n\nEXAMPLES VALUES\n* Tests\n* FullyQualifiedName~Tests\nthese two first examples are equivalent\n* Name!=MyTestMethod\n* "ClassName=MyTestClass1 | ClassName=MyTestClass2"\n* "TestCategory=Customer & Priority=1"\n\nDOCS https://docs.microsoft.com/en-us/dotnet/core/tools/dotnet-test?tabs=netcore21#filter-option-details')
+        string(name: 'test_platform', defaultValue: 'windows_10_chrome_90', description: 'the platform details to use in running the tests')
+        booleanParam(name: 'testcase_read', defaultValue: true, description: 'use TestRail to filter execution')
+        booleanParam(name: 'testcase_write', defaultValue: false, description: 'write results to a pre-existing TestRail Plan')
+        string(name: 'testrail_case_includes', defaultValue: '', description: 'the category or delimited list of categories to run tests from')
+        string(name: 'testcase_planid', defaultValue: '', description: 'the TestRail plan to write results to')
+        string(name: 'NumThreads', defaultValue: '7', description: '')
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                deleteDir() /* clean up our workspace */
+            }
+        }
+        stage('Get code from BitBucket') { // for display purposes
+            steps {
+                // Get code from a BitBucket repository
+                git branch: "${GitBranch}", changelog: false, credentialsId: '12342-234324-22344543712c9', poll: false, url: "https://repourl/tests.git"
+
+                // update build name
+                script {
+                    // Get the revision
+                    shortCommit = sh(returnStdout: true, script: "git log -n 1 --pretty=format:'%h'").trim()
+                    currentBuild.displayName = "#${BUILD_NUMBER}-${GitBranch}-${shortCommit}"
+                }
+            }
+        }
+        stage('Build Solution') {
+            steps {
+                bat(returnStdout: false, script: "dotnet build api.ui.Tests.sln")
+            }
+            post {
+                success {
+                    echo 'Build Solution completed successfully'
+                }
+            }
+        }
+        stage('Test Solution') {
+            steps {
+                bat(returnStdout: false, script: "dotnet test api.ui.Tests.sln --no-build --no-restore -l \"trx;LogFileName=UnitTestResults.trx\" --filter ${TestFilter}")
+            }
+            post {
+                always {
+                    echo 'Archiving Test Results and Logs'
+                    archiveArtifacts artifacts: '**\\TestResults\\*', fingerprint: true, allowEmptyArchive: true
+                    catchError {
+                        step([$class: 'MSTestPublisher', testResultsFile:"**\\TestResults\\*.trx", failOnError: true, keepLongStdio: true])
+                    }
+                }
+                success {
+                    echo 'Test Solution completed successfully'
+                }
+            }
+        }
+    }
+    post {
+        always {
+            catchError{
+                echo 'sending results to logstash...'
+                    logstashSend failBuild: false, maxLines: 2
+                echo 'Publishing HTML file'
+                    publishHTML([allowMissing: true, alwaysLinkToLastBuild: true, keepAll: true, reportDir: 'TestResults', reportFiles: 'TestResults.html', reportName: 'Test Results HTML', reportTitles: ''])
+            }
+        }
+        success {
+            echo 'Successful Build'
+            slackSend channel: '#alertchannel',
+            token: 'asdfa234sdf234ds32',
+            color: 'good',
+            message: "Build: ${currentBuild.fullDisplayName} - Successful! |  Test Report: ${BUILD_URL}Test_20Report"
+        }
+        unstable {
+            echo 'Unstable Build'
+			slackSend channel: '#alertchannerl',
+            token: 'asd34s34cv43v43v4',
+            color: 'danger',
+            message: "Build: ${currentBuild.fullDisplayName} - Unstable! |  Test Report: ${BUILD_URL}Test_20Report"
+        }
+        failure {
+            echo 'Failed Build'
+            echo 'Archiving everything...'
+            archiveArtifacts artifacts: '**\\*', fingerprint: false, allowEmptyArchive: true
+            slackSend channel: '#alertchannerl',
+            token: '`fsd324dskf4387dsyk43d',
+            color: 'danger',
+            message: "Build: ${currentBuild.fullDisplayName} - Failed! |  Test Report: ${BUILD_URL}Test_20Report"
+        }
+        changed {
+            echo 'Status Change from previous build'
+        }
+    }
+}
+
+----------------------------------------------------------
